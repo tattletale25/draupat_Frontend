@@ -19,18 +19,21 @@ export function DashboardPage() {
   const [skuRows, setSkuRows] = useState<SkuRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getCompanies(), getCategorySummary(), getPriceTrendSeries(), getSkuRows()]).then(
-      ([c, s, t, rows]) => {
+    Promise.all([getCompanies(), getCategorySummary(), getPriceTrendSeries(), getSkuRows()])
+      .then(([c, s, t, rows]) => {
         setCompanies(c);
         setSummaries(s);
         setTrend(t);
         setSkuRows(rows);
         setSelected(c.map((x) => x.siteCode));
-        setLoading(false);
-      },
-    );
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Failed to load competitor data.');
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const selectedCompanies = useMemo(
@@ -89,6 +92,10 @@ export function DashboardPage() {
 
   if (loading) {
     return <div className="chart-empty">Loading competitor data…</div>;
+  }
+
+  if (error) {
+    return <div className="chart-empty">Couldn't load competitor data: {error}</div>;
   }
 
   return (

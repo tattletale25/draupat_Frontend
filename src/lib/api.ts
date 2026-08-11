@@ -1,5 +1,24 @@
-import { CHART_HEX } from '../data/constants';
-import type { Category, Company, CategorySummary, PriceTrendPoint, SkuRow } from '../types';
+import { CAPABILITIES_BY_SITE, CHART_HEX } from '../data/constants';
+import type {
+  Category,
+  Company,
+  CategorySummary,
+  CollectionSpreadRow,
+  FlaggedGapRow,
+  PriceTrendPoint,
+  RankMovementRow,
+  RankedProduct,
+  SiteCapabilities,
+  SkuRow,
+  TopOfFeedShareRow,
+} from '../types';
+import {
+  getCollectionSpreadRows,
+  getFlaggedGapRows,
+  getRankMovementRows,
+  getRankedProducts,
+  getTopOfFeedShareRows,
+} from '../data/mock-data';
 
 /* =====================================================================
  * Single data-access layer for the whole app. Every component fetches
@@ -63,6 +82,12 @@ async function fetchJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const NO_CAPABILITIES: SiteCapabilities = {
+  categoryRankScore: false,
+  rankMovement: false,
+  collectionSpread: false,
+};
+
 /** GET /sites */
 export async function getCompanies(): Promise<Company[]> {
   const rows = await fetchJson<SiteDto[]>('/sites');
@@ -70,6 +95,9 @@ export async function getCompanies(): Promise<Company[]> {
     siteCode: r.site_code,
     brandName: r.brand_name,
     color: CHART_HEX[r.site_code] ?? 'var(--chart-1)',
+    // /sites doesn't return this yet — see API_CONTRACT.md "Product Index"
+    // for the field this stands in for once the backend adds it.
+    capabilities: CAPABILITIES_BY_SITE[r.site_code] ?? NO_CAPABILITIES,
   }));
 }
 
@@ -128,4 +156,38 @@ export async function getSkuRows(): Promise<SkuRow[]> {
     }),
   );
   return perCompany.flat();
+}
+
+/* =====================================================================
+ * Product Index. None of these five endpoints exist on the backend yet —
+ * see API_CONTRACT.md "Product Index" for the proposed shapes, the SQL
+ * views behind them, and (importantly) which sites can populate which
+ * metric today. Backed by src/data/mock-data.ts in the meantime; swapping
+ * each of these to a real fetchJson() call is the only change needed once
+ * the corresponding endpoint ships — same pattern as every function above.
+ * ===================================================================== */
+
+/** Future: GET /analytics/category-rank?companies=...&category=... */
+export async function getRankedProductsData(): Promise<RankedProduct[]> {
+  return getRankedProducts();
+}
+
+/** Future: GET /analytics/rank-movement?companies=...&category=... */
+export async function getRankMovementData(): Promise<RankMovementRow[]> {
+  return getRankMovementRows();
+}
+
+/** Future: GET /analytics/flagged-rank-gap?companies=... */
+export async function getFlaggedGapData(): Promise<FlaggedGapRow[]> {
+  return getFlaggedGapRows();
+}
+
+/** Future: GET /analytics/collection-spread?companies=...&category=... */
+export async function getCollectionSpreadData(): Promise<CollectionSpreadRow[]> {
+  return getCollectionSpreadRows();
+}
+
+/** Future: GET /analytics/top-of-feed-share?companies=... */
+export async function getTopOfFeedShareData(): Promise<TopOfFeedShareRow[]> {
+  return getTopOfFeedShareRows();
 }

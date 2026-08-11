@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
-import { IconDashboard } from '../components/ui/Icon';
+import { IconDashboard, IconLayers } from '../components/ui/Icon';
 import { DashboardPage } from '../pages/DashboardPage';
+import { ProductIndexPage } from '../pages/ProductIndexPage';
 
 export interface AppRoute {
   path: string; // hash path, e.g. '/dashboard'
@@ -24,6 +25,13 @@ export const ROUTES: AppRoute[] = [
     description: 'Category price, SKU counts, and price history across tracked competitors',
     icon: IconDashboard,
     Component: DashboardPage,
+  },
+  {
+    path: '/product-index',
+    label: 'Product Index',
+    description: 'On-page merchandising rank, movement, and cross-listing spread across tracked competitors',
+    icon: IconLayers,
+    Component: ProductIndexPage,
   },
 ];
 

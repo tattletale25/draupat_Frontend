@@ -1,6 +1,19 @@
-import { CATEGORIES, type Category, type CategorySummary, type PriceBand, type PriceTrendPoint, type SkuRow } from '../types';
-import { COMPANIES } from './constants';
+import {
+  CATEGORIES,
+  type Category,
+  type CategorySummary,
+  type CollectionSpreadRow,
+  type FlaggedGapRow,
+  type PriceBand,
+  type PriceTrendPoint,
+  type RankMovementRow,
+  type RankedProduct,
+  type SkuRow,
+  type TopOfFeedShareRow,
+} from '../types';
+import { CHART_HEX, COMPANIES } from './constants';
 import { hashSeed, mulberry32 } from '../lib/utils';
+import { placeholderProductImage } from '../lib/placeholder';
 
 /* =====================================================================
  * Synthetic competitor catalog + price-history data.
@@ -52,6 +65,52 @@ const CATEGORY_WEIGHT: Record<Category, number> = {
   pendants: 0.1,
 };
 
+const CATEGORY_SINGULAR: Record<Category, string> = {
+  rings: 'Ring',
+  necklaces: 'Necklace',
+  earrings: 'Earrings',
+  bracelets: 'Bracelet',
+  pendants: 'Pendant',
+};
+
+const MATERIALS = [
+  'Gold-Plated',
+  'Silver',
+  'Rose Gold',
+  'Oxidised Silver',
+  'American Diamond',
+  'Kundan',
+  'Pearl',
+  'Temple',
+  'Minimal',
+  'Statement',
+];
+
+function productName(rand: () => number, category: Category): string {
+  const material = MATERIALS[Math.floor(rand() * MATERIALS.length)];
+  return `${material} ${CATEGORY_SINGULAR[category]}`;
+}
+
+/** Fisher-Yates shuffle of [0..n-1], seeded. */
+function shuffledIndices(n: number, rand: () => number): number[] {
+  const arr = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/** Turns a feed order (feedOrder[position] = sku index) into a lookup from
+ * sku index -> its 0-based position in that feed. */
+function positionsFromFeedOrder(feedOrder: number[]): number[] {
+  const positionOf = new Array<number>(feedOrder.length);
+  feedOrder.forEach((skuIdx, pos) => {
+    positionOf[skuIdx] = pos;
+  });
+  return positionOf;
+}
+
 function priceBandOf(price: number): PriceBand {
   if (price < 5000) return 'entry';
   if (price <= 25000) return 'mid';
@@ -75,6 +134,11 @@ interface CellData {
   category: Category;
   skuRows: SkuRow[];
   trend: PriceTrendPoint[];
+  names: string[]; // parallel to skuRows
+  isNewArrival: boolean[]; // parallel to skuRows
+  positionToday: number[]; // parallel to skuRows — 0-based on-page slot, today
+  positionYesterday: number[]; // parallel to skuRows — 0-based on-page slot, prior scrape
+  nCategories: number[]; // parallel to skuRows
 }
 
 function buildCell(siteCode: string, category: Category): CellData {
@@ -84,6 +148,9 @@ function buildCell(siteCode: string, category: Category): CellData {
   const baseAvg = CATEGORY_BASE_PRICE[category] * (COMPANY_PRICE_MULTIPLIER[siteCode] ?? 1) * (0.9 + rand() * 0.2);
 
   const skuRows: SkuRow[] = [];
+  const names: string[] = [];
+  const isNewArrival: boolean[] = [];
+  const nCategories: number[] = [];
   for (let i = 0; i < count; i++) {
     const spread = 0.55 + rand() * 0.9; // ~0.55x - 1.45x of category/company average
     const listPrice = Math.round((baseAvg * spread) / 10) * 10;
@@ -91,7 +158,8 @@ function buildCell(siteCode: string, category: Category): CellData {
     const avgDiscountPct = discounted ? Math.round((5 + rand() * 30) * 10) / 10 : 0;
     const isBestSeller = rand() < 0.08;
     const status: SkuRow['status'] = rand() < 0.05 ? 'Inactive' : 'Live';
-    const dateAdded = isoDaysAgo(Math.round(rand() * 365));
+    const daysAgo = Math.round(rand() * 365);
+    const dateAdded = isoDaysAgo(daysAgo);
     skuRows.push({
       skuId: `${siteCode.slice(0, 3).toUpperCase()}-${category.slice(0, 3).toUpperCase()}-${String(i + 1).padStart(4, '0')}`,
       siteCode,
@@ -103,7 +171,27 @@ function buildCell(siteCode: string, category: Category): CellData {
       isBestSeller,
       dateAdded,
     });
+    names.push(productName(rand, category));
+    isNewArrival.push(daysAgo <= 30);
+    // Collection spread: most SKUs sit in a couple of listings, a handful
+    // of "hero" pieces get cross-merchandised into many more.
+    nCategories.push(rand() < 0.08 ? 5 + Math.floor(rand() * 4) : 1 + Math.floor(rand() * 3));
   }
+
+  // On-page shelf order: today's feed order, and yesterday's — close to
+  // today's (a handful of bounded local swaps) rather than an independent
+  // reshuffle, so deltas look like real day-to-day movement instead of noise.
+  const todayOrder = shuffledIndices(count, rand);
+  const yesterdayOrder = [...todayOrder];
+  const swaps = Math.round(count * 0.4);
+  for (let s = 0; s < swaps; s++) {
+    const a = Math.floor(rand() * count);
+    const span = Math.min(count - 1, 3);
+    const b = Math.min(count - 1, Math.max(0, a + Math.floor(rand() * (span * 2 + 1)) - span));
+    [yesterdayOrder[a], yesterdayOrder[b]] = [yesterdayOrder[b], yesterdayOrder[a]];
+  }
+  const positionToday = positionsFromFeedOrder(todayOrder);
+  const positionYesterday = positionsFromFeedOrder(yesterdayOrder);
 
   // Weekly category-level average price trend: a random walk starting
   // ~6 months ago and drifting toward today's computed average, with
@@ -134,7 +222,11 @@ function buildCell(siteCode: string, category: Category): CellData {
     skuCount: count,
   };
 
-  return { siteCode, category, skuRows, trend };
+  return { siteCode, category, skuRows, trend, names, isNewArrival, positionToday, positionYesterday, nCategories };
+}
+
+function capabilitiesOf(siteCode: string) {
+  return COMPANIES.find((c) => c.siteCode === siteCode)?.capabilities;
 }
 
 let _cells: CellData[] | null = null;
@@ -189,4 +281,126 @@ export function getCategorySummaries(): CategorySummary[] {
 
 export function getPriceTrend(): PriceTrendPoint[] {
   return cells().flatMap((c) => c.trend);
+}
+
+/* ---------------------------------------------------------------------
+ * Product Index — merchandising rank, movement, tag-vs-placement gap,
+ * collection spread, top-of-feed concentration. Which sites can populate
+ * which of these is deliberately uneven (see Company.capabilities and
+ * API_CONTRACT.md "Product Index") — it mirrors a real backend gap, not a
+ * mock-data shortcut.
+ * ------------------------------------------------------------------- */
+
+export function getRankedProducts(): RankedProduct[] {
+  return cells().flatMap((c) => {
+    const supported = capabilitiesOf(c.siteCode)?.categoryRankScore ?? false;
+    const color = CHART_HEX[c.siteCode] ?? '#71717a';
+    const n = c.skuRows.length;
+    return c.skuRows.map((row, i): RankedProduct => {
+      const categoryIndex = supported ? c.positionToday[i] : null;
+      const categoryTotal = supported ? n : null;
+      const rankScore = supported ? (n > 1 ? categoryIndex! / (n - 1) : 0) : null;
+      return {
+        skuId: row.skuId,
+        siteCode: row.siteCode,
+        category: row.category,
+        name: c.names[i],
+        imageUrl: placeholderProductImage(row.skuId, color),
+        price: row.listPrice ?? 0,
+        categoryIndex,
+        categoryTotal,
+        rankScore,
+        isBestSeller: row.isBestSeller,
+        isNewArrival: c.isNewArrival[i],
+      };
+    });
+  });
+}
+
+export function getRankMovementRows(): RankMovementRow[] {
+  return cells().flatMap((c) => {
+    if (!capabilitiesOf(c.siteCode)?.rankMovement) return [];
+    const color = CHART_HEX[c.siteCode] ?? '#71717a';
+    return c.skuRows.map((row, i): RankMovementRow => {
+      const positionToday = c.positionToday[i] + 1; // 1-based for display
+      const positionYesterday = c.positionYesterday[i] + 1;
+      return {
+        skuId: row.skuId,
+        siteCode: row.siteCode,
+        category: row.category,
+        name: c.names[i],
+        imageUrl: placeholderProductImage(row.skuId, color),
+        positionToday,
+        positionYesterday,
+        delta: positionToday - positionYesterday,
+      };
+    });
+  });
+}
+
+/** Groups rank-scored products by site+category, dropping anything without
+ * a score — used by both the flagged-gap and top-of-feed-share rollups,
+ * which are both derived aggregates over getRankedProducts(). */
+function groupScoredBySiteCategory(products: RankedProduct[]): Map<string, RankedProduct[]> {
+  const map = new Map<string, RankedProduct[]>();
+  for (const p of products) {
+    if (p.rankScore === null) continue;
+    const key = `${p.siteCode}:${p.category}`;
+    const list = map.get(key);
+    if (list) list.push(p);
+    else map.set(key, [p]);
+  }
+  return map;
+}
+
+function avgScore(list: RankedProduct[]): number | null {
+  return list.length ? list.reduce((s, p) => s + (p.rankScore ?? 0), 0) / list.length : null;
+}
+
+export function getFlaggedGapRows(): FlaggedGapRow[] {
+  const groups = groupScoredBySiteCategory(getRankedProducts());
+  return Array.from(groups.entries()).map(([key, products]): FlaggedGapRow => {
+    const [siteCode, category] = key.split(':') as [string, Category];
+    const flagged = products.filter((p) => p.isBestSeller || p.isNewArrival);
+    const flaggedAvgScore = avgScore(flagged);
+    const catalogAvgScore = avgScore(products);
+    return {
+      siteCode,
+      category,
+      flaggedAvgScore,
+      catalogAvgScore,
+      gap: flaggedAvgScore !== null && catalogAvgScore !== null ? flaggedAvgScore - catalogAvgScore : null,
+      flaggedCount: flagged.length,
+      totalCount: products.length,
+    };
+  });
+}
+
+export function getCollectionSpreadRows(): CollectionSpreadRow[] {
+  return cells().flatMap((c) => {
+    if (!capabilitiesOf(c.siteCode)?.collectionSpread) return [];
+    const color = CHART_HEX[c.siteCode] ?? '#71717a';
+    return c.skuRows.map((row, i): CollectionSpreadRow => ({
+      skuId: row.skuId,
+      siteCode: row.siteCode,
+      category: row.category,
+      name: c.names[i],
+      imageUrl: placeholderProductImage(row.skuId, color),
+      nCategories: c.nCategories[i],
+    }));
+  });
+}
+
+export function getTopOfFeedShareRows(): TopOfFeedShareRow[] {
+  const groups = groupScoredBySiteCategory(getRankedProducts());
+  return Array.from(groups.entries()).map(([key, products]): TopOfFeedShareRow => {
+    const [siteCode, category] = key.split(':') as [string, Category];
+    const inTopDecile = products.filter((p) => (p.rankScore ?? 1) <= 0.1).length;
+    return {
+      siteCode,
+      category,
+      pctTopDecile: Math.round((inTopDecile / products.length) * 1000) / 10,
+      skuCount: products.length,
+    };
+  });
 }
