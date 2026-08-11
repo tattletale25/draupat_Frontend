@@ -1,52 +1,131 @@
-import { COMPANIES } from '../data/constants';
-import { getAllSkuRows, getCategorySummaries, getPriceTrend } from '../data/mock-data';
-import type { Company, CategorySummary, PriceTrendPoint, SkuRow } from '../types';
+import { CHART_HEX } from '../data/constants';
+import type { Category, Company, CategorySummary, PriceTrendPoint, SkuRow } from '../types';
 
 /* =====================================================================
  * Single data-access layer for the whole app. Every component fetches
- * data through these functions instead of importing mock-data.ts
- * directly — that's the one place to change when the real backend is
- * ready. See API_CONTRACT.md at the repo root for the exact endpoints
- * this is designed to call.
- *
- * To switch to the live backend once it's running, replace the bodies
- * below with e.g.:
- *
- *   const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
- *   export async function getCompanies(): Promise<Company[]> {
- *     const res = await fetch(`${API_BASE}/sites`);
- *     return res.json();
- *   }
- *
- * Every function already returns a Promise, so calling code doesn't
- * change either way.
+ * data through these functions instead of calling fetch() directly —
+ * this is the one place that talks to the backend. See API_CONTRACT.md
+ * at the repo root for the exact endpoints/response shapes this calls.
  * ===================================================================== */
 
-const MOCK_LATENCY_MS = 0; // set >0 (e.g. 150) if you want to see loading states
+const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 
-function delay<T>(value: T): Promise<T> {
-  return MOCK_LATENCY_MS > 0
-    ? new Promise((resolve) => setTimeout(() => resolve(value), MOCK_LATENCY_MS))
-    : Promise.resolve(value);
+interface SiteDto {
+  site_code: string;
+  brand_name: string;
 }
 
-/** GET /sites in the real backend. */
-export function getCompanies(): Promise<Company[]> {
-  return delay(COMPANIES);
+interface CategorySummaryDto {
+  site_code: string;
+  category: Category;
+  sku_count: number;
+  sku_count_in_stock: number;
+  min_price: number | null;
+  avg_price: number | null;
+  median_price: number | null;
+  max_price: number | null;
+  avg_discount_pct: number | null;
+  pct_skus_discounted: number | null;
+  price_band_mix: { entry: number; mid: number; premium: number };
 }
 
-/** GET /analytics/category-summary?companies=... in the real backend. */
-export function getCategorySummary(): Promise<CategorySummary[]> {
-  return delay(getCategorySummaries());
+interface PriceTrendDto {
+  site_code: string;
+  category: Category;
+  week_start: string;
+  avg_price: number | null;
+  sku_count: number;
 }
 
-/** GET /analytics/price-trend?companies=...&months=6 in the real backend. */
-export function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
-  return delay(getPriceTrend());
+interface CatalogSkuDto {
+  sku_id: string;
+  status: 'Live' | 'Inactive';
+  date_added: string;
+  category: Category | null;
+  design_attributes: { base_material: string | null; stone_type: string | null };
+  pricing_and_margins: {
+    price_tier: string;
+    list_price: number | null;
+    average_discount_percentage: number | null;
+  };
+  performance_data: { is_best_seller: boolean };
 }
 
-/** GET /catalog?company=... (already exists in the real backend) flattened
- * across every tracked company, for the detail table + CSV export. */
-export function getSkuRows(): Promise<SkuRow[]> {
-  return delay(getAllSkuRows());
+interface CatalogResponseDto {
+  skus: CatalogSkuDto[];
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`);
+  if (!res.ok) {
+    throw new Error(`${path} -> HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+/** GET /sites */
+export async function getCompanies(): Promise<Company[]> {
+  const rows = await fetchJson<SiteDto[]>('/sites');
+  return rows.map((r) => ({
+    siteCode: r.site_code,
+    brandName: r.brand_name,
+    color: CHART_HEX[r.site_code] ?? 'var(--chart-1)',
+  }));
+}
+
+/** GET /analytics/category-summary (all companies/categories — filtering happens client-side) */
+export async function getCategorySummary(): Promise<CategorySummary[]> {
+  const rows = await fetchJson<CategorySummaryDto[]>('/analytics/category-summary');
+  return rows.map((r) => ({
+    siteCode: r.site_code,
+    category: r.category,
+    skuCount: r.sku_count,
+    skuCountInStock: r.sku_count_in_stock,
+    minPrice: r.min_price ?? 0,
+    avgPrice: r.avg_price ?? 0,
+    maxPrice: r.max_price ?? 0,
+    medianPrice: r.median_price ?? 0,
+    avgDiscountPct: r.avg_discount_pct ?? 0,
+    pctSkusDiscounted: r.pct_skus_discounted ?? 0,
+    priceBandMix: r.price_band_mix,
+  }));
+}
+
+/** GET /analytics/price-trend (all companies/categories — filtering happens client-side) */
+export async function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
+  const rows = await fetchJson<PriceTrendDto[]>('/analytics/price-trend');
+  return rows.map((r) => ({
+    siteCode: r.site_code,
+    category: r.category,
+    date: r.week_start,
+    avgPrice: r.avg_price ?? 0,
+    skuCount: r.sku_count,
+  }));
+}
+
+/** GET /catalog?company=... once per tracked company, flattened — no single
+ * "all companies" catalog endpoint exists on the backend. */
+export async function getSkuRows(): Promise<SkuRow[]> {
+  const companies = await getCompanies();
+  const perCompany = await Promise.all(
+    companies.map(async (c) => {
+      const data = await fetchJson<CatalogResponseDto>(`/catalog?company=${encodeURIComponent(c.siteCode)}`);
+      return data.skus
+        .filter((s) => s.category !== null)
+        .map(
+          (s): SkuRow => ({
+            skuId: s.sku_id,
+            siteCode: c.siteCode,
+            category: s.category as Category,
+            status: s.status,
+            priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
+            listPrice: s.pricing_and_margins.list_price,
+            avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
+            isBestSeller: s.performance_data.is_best_seller,
+            dateAdded: s.date_added,
+          }),
+        );
+    }),
+  );
+  return perCompany.flat();
 }
