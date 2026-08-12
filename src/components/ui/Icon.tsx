@@ -116,3 +116,16 @@ export function IconCheckCircle(props: IconProps) {
     </svg>
   );
 }
+
+/** Brand mark — a shovel, drawn on the diagonal with a rounded, uneven
+ * blade rather than a rigid geometric one, so it reads as illustrated
+ * rather than a literal tool-icon glyph. */
+export function IconShovel(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="17.3" cy="4.7" r="1.7" />
+      <path d="M16 6L7.2 14.8" />
+      <path d="M4 13.3c1.9-2.1 4.3-2.7 6.4-1.9 1 .4 1.5 1.3 1.1 2.3-.8 1.9-2.9 3.3-5.2 3.8-1 .2-2-.1-2.6-.9-.7-.9-.4-2.2.3-3.3z" />
+    </svg>
+  );
+}

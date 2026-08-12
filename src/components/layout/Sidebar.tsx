@@ -1,5 +1,5 @@
 import { ROUTES } from '../../router/routes';
-import { IconSparkle } from '../ui/Icon';
+import { IconShovel } from '../ui/Icon';
 
 interface SidebarProps {
   activePath: string;
@@ -11,7 +11,7 @@ export function Sidebar({ activePath, onNavigate }: SidebarProps) {
     <aside className="sidebar">
       <div className="sidebar-brand">
         <div className="mark">
-          <IconSparkle width={14} height={14} />
+          <IconShovel width={14} height={14} />
         </div>
         <div>
           <div className="name">draupat</div>
