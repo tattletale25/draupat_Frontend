@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
-import { IconDashboard, IconLayers } from '../components/ui/Icon';
+import { IconDashboard, IconLayers, IconMessageCircle } from '../components/ui/Icon';
+import { AskAwayPage } from '../pages/AskAwayPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { ProductIndexPage } from '../pages/ProductIndexPage';
 
@@ -32,6 +33,13 @@ export const ROUTES: AppRoute[] = [
     description: 'On-page merchandising rank, movement, and cross-listing spread across tracked competitors',
     icon: IconLayers,
     Component: ProductIndexPage,
+  },
+  {
+    path: '/ask-away',
+    label: 'Ask Away',
+    description: 'Free-text Q&A over the tracked competitor data, with a chart when one helps',
+    icon: IconMessageCircle,
+    Component: AskAwayPage,
   },
 ];
 

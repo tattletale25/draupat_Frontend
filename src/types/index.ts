@@ -150,3 +150,81 @@ export interface TopOfFeedShareRow {
   pctTopDecile: number; // 0-100
   skuCount: number;
 }
+
+/* =====================================================================
+ * Ask Away (left-nav page, below Product Index). Free-text question in,
+ * grounded text answer + an optional chart/table out. Maps to POST /query
+ * (backend/app/nl_query — see that repo's app/graphs/schema.py:GraphSpec,
+ * the exact shape every /metrics/* endpoint there also returns). Prefixed
+ * `Graph*` rather than `Chart*` to avoid colliding with the domain
+ * `Category` type above — these are chart-rendering primitives, not
+ * jewellery categories.
+ * ===================================================================== */
+
+export type GraphChartType =
+  | 'bar'
+  | 'stacked_bar'
+  | 'line'
+  | 'heatmap'
+  | 'diverging_bar'
+  | 'dumbbell'
+  | 'meter'
+  | 'stat'
+  | 'table';
+
+export interface GraphCategory {
+  label: string;
+  color: string | null;
+}
+
+export interface GraphSeries {
+  name: string;
+  values: (number | null)[]; // aligned with GraphAxis.categories
+  color: string | null;
+}
+
+export interface GraphAxis {
+  title: string;
+  categories: GraphCategory[];
+}
+
+export interface GraphValueAxis {
+  title: string;
+  series: GraphSeries[];
+}
+
+export interface GraphTableColumn {
+  key: string;
+  label: string;
+}
+
+export interface GraphTableData {
+  columns: GraphTableColumn[];
+  rows: Record<string, string | number | boolean | null>[];
+}
+
+/** One chart/table spec. `facets` (small multiples, e.g. one dumbbell per
+ * category) holds nested GraphSpecs — when present, render those instead
+ * of this node's own (empty) xAxis/yAxis. The NL-query agent never
+ * produces facets (only the /metrics/* endpoints do), but the shape
+ * allows for it. */
+export interface GraphSpec {
+  applicable: boolean;
+  chartType: GraphChartType;
+  title: string;
+  description: string;
+  unit: string;
+  baseline: number | null;
+  target: number | null;
+  xAxis: GraphAxis;
+  yAxis: GraphValueAxis;
+  table: GraphTableData | null;
+  facets: GraphSpec[];
+}
+
+/** POST /query response. */
+export interface AskAwayResult {
+  answer: string;
+  comment: string;
+  graph: GraphSpec;
+}
