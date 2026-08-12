@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import type { GraphSpec } from '../../../types';
 import { IconMessageCircle, IconSparkle } from '../../ui/Icon';
-import { GraphRenderer } from './GraphRenderer';
+import { GraphRenderer } from '../GraphRenderer';
 
 // Bold/inline-code only — the model's answers lean on **term** and `value`
 // for emphasis; no need for a full markdown parser (no npm access in this

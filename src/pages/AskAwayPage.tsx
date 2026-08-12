@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { askQuery } from '../lib/api';
+import { appendChatMessages, setChatSending, updateChatMessage, useChatMessages, useChatSending } from '../lib/chat-store';
 import { ChatInputBar } from '../components/dashboard/ask-away/ChatInputBar';
 import { ChatMessageBubble } from '../components/dashboard/ask-away/ChatMessageBubble';
 import type { ChatMessage } from '../components/dashboard/ask-away/ChatMessageBubble';
@@ -12,10 +13,11 @@ const newId = () => `msg-${++nextId}`;
  * question sent is the only thing in that request's body — nothing from
  * earlier turns in this thread is replayed, so the backend/model never
  * sees more than the one question it's currently answering. The thread
- * you see below is local UI history only. */
+ * you see below is local UI history only, held in lib/chat-store so it
+ * survives switching to another tab and back. */
 export function AskAwayPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [sending, setSending] = useState(false);
+  const messages = useChatMessages();
+  const sending = useChatSending();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,25 +28,17 @@ export function AskAwayPage() {
     const userMessage: ChatMessage = { id: newId(), role: 'user', text, status: 'done' };
     const pendingId = newId();
     const pendingMessage: ChatMessage = { id: pendingId, role: 'assistant', text: '', status: 'pending' };
-    setMessages((prev) => [...prev, userMessage, pendingMessage]);
-    setSending(true);
+    appendChatMessages([userMessage, pendingMessage]);
+    setChatSending(true);
 
     try {
       const result = await askQuery(text);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === pendingId
-            ? { ...m, status: 'done', text: result.answer, comment: result.comment, graph: result.graph }
-            : m,
-        ),
-      );
+      updateChatMessage(pendingId, { status: 'done', text: result.answer, comment: result.comment, graph: result.graph });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Something went wrong reaching the backend.';
-      setMessages((prev) =>
-        prev.map((m) => (m.id === pendingId ? { ...m, status: 'error', text: `Couldn't get an answer: ${message}` } : m)),
-      );
+      updateChatMessage(pendingId, { status: 'error', text: `Couldn't get an answer: ${message}` });
     } finally {
-      setSending(false);
+      setChatSending(false);
     }
   }
 

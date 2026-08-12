@@ -107,3 +107,12 @@ export function IconSend(props: IconProps) {
     </svg>
   );
 }
+
+export function IconCheckCircle(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 12.5l2.2 2.2 4.8-5.4" />
+    </svg>
+  );
+}

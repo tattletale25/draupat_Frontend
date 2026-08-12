@@ -1,7 +1,19 @@
 import type { ComponentType } from 'react';
-import { IconDashboard, IconLayers, IconMessageCircle } from '../components/ui/Icon';
+import {
+  IconCheckCircle,
+  IconDashboard,
+  IconLayers,
+  IconMessageCircle,
+  IconPackage,
+  IconTag,
+  IconTrendingUp,
+} from '../components/ui/Icon';
 import { AskAwayPage } from '../pages/AskAwayPage';
+import { AssortmentPage } from '../pages/AssortmentPage';
+import { AvailabilityPage } from '../pages/AvailabilityPage';
 import { DashboardPage } from '../pages/DashboardPage';
+import { DiscountingPage } from '../pages/DiscountingPage';
+import { PricingPage } from '../pages/PricingPage';
 import { ProductIndexPage } from '../pages/ProductIndexPage';
 
 export interface AppRoute {
@@ -33,6 +45,34 @@ export const ROUTES: AppRoute[] = [
     description: 'On-page merchandising rank, movement, and cross-listing spread across tracked competitors',
     icon: IconLayers,
     Component: ProductIndexPage,
+  },
+  {
+    path: '/assortment',
+    label: 'Assortment',
+    description: 'SKU count per category and net catalog change, across tracked competitors',
+    icon: IconPackage,
+    Component: AssortmentPage,
+  },
+  {
+    path: '/pricing',
+    label: 'Pricing',
+    description: 'Price positioning, price-band mix, and category price distribution across tracked competitors',
+    icon: IconTag,
+    Component: PricingPage,
+  },
+  {
+    path: '/discounting',
+    label: 'Discounting',
+    description: 'Average discount depth and breadth, across tracked competitors',
+    icon: IconTrendingUp,
+    Component: DiscountingPage,
+  },
+  {
+    path: '/availability',
+    label: 'Availability',
+    description: 'In-stock rate by brand and category, across tracked competitors',
+    icon: IconCheckCircle,
+    Component: AvailabilityPage,
   },
   {
     path: '/ask-away',

@@ -7,6 +7,7 @@ import type {
   CollectionSpreadRow,
   FlaggedGapRow,
   GraphSpec,
+  MetricResponse,
   PriceTrendPoint,
   RankMovementRow,
   RankedProduct,
@@ -73,6 +74,24 @@ interface CatalogResponseDto {
   skus: CatalogSkuDto[];
 }
 
+// Every GET below reflects a once-daily data refresh (see README), so
+// caching for the lifetime of the page is safe: repeat calls (e.g.
+// re-visiting a tab, or getSkuRows() pulling in getCompanies()) reuse the
+// same in-flight/resolved promise instead of re-hitting the network.
+// Failed requests are evicted so the next call retries.
+const requestCache = new Map<string, Promise<unknown>>();
+
+function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = requestCache.get(key);
+  if (hit) return hit as Promise<T>;
+  const promise = load().catch((err: unknown) => {
+    requestCache.delete(key);
+    throw err;
+  });
+  requestCache.set(key, promise);
+  return promise;
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   // ngrok's free tier serves an HTML interstitial to browser requests
   // unless this header is set; harmless against non-ngrok API_BASE values.
@@ -98,75 +117,86 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 /** GET /sites */
-export async function getCompanies(): Promise<Company[]> {
-  const rows = await fetchJson<SiteDto[]>('/sites');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    brandName: r.brand_name,
-    color: CHART_HEX[r.site_code] ?? 'var(--chart-1)',
-    capabilities: {
-      categoryRankScore: r.capabilities.category_rank_score,
-      rankMovement: r.capabilities.rank_movement,
-      collectionSpread: r.capabilities.collection_spread,
-    },
-  }));
+export function getCompanies(): Promise<Company[]> {
+  return cached('sites', async () => {
+    const rows = await fetchJson<SiteDto[]>('/sites');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      brandName: r.brand_name,
+      color: CHART_HEX[r.site_code] ?? 'var(--chart-1)',
+      capabilities: {
+        categoryRankScore: r.capabilities.category_rank_score,
+        rankMovement: r.capabilities.rank_movement,
+        collectionSpread: r.capabilities.collection_spread,
+      },
+    }));
+  });
 }
 
 /** GET /analytics/category-summary (all companies/categories — filtering happens client-side) */
-export async function getCategorySummary(): Promise<CategorySummary[]> {
-  const rows = await fetchJson<CategorySummaryDto[]>('/analytics/category-summary');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    skuCount: r.sku_count,
-    skuCountInStock: r.sku_count_in_stock,
-    minPrice: r.min_price ?? 0,
-    avgPrice: r.avg_price ?? 0,
-    maxPrice: r.max_price ?? 0,
-    medianPrice: r.median_price ?? 0,
-    avgDiscountPct: r.avg_discount_pct ?? 0,
-    pctSkusDiscounted: r.pct_skus_discounted ?? 0,
-    priceBandMix: r.price_band_mix,
-  }));
+export function getCategorySummary(): Promise<CategorySummary[]> {
+  return cached('category-summary', async () => {
+    const rows = await fetchJson<CategorySummaryDto[]>('/analytics/category-summary');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      skuCount: r.sku_count,
+      skuCountInStock: r.sku_count_in_stock,
+      minPrice: r.min_price ?? 0,
+      avgPrice: r.avg_price ?? 0,
+      maxPrice: r.max_price ?? 0,
+      medianPrice: r.median_price ?? 0,
+      avgDiscountPct: r.avg_discount_pct ?? 0,
+      pctSkusDiscounted: r.pct_skus_discounted ?? 0,
+      priceBandMix: r.price_band_mix,
+    }));
+  });
 }
 
 /** GET /analytics/price-trend (all companies/categories — filtering happens client-side) */
-export async function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
-  const rows = await fetchJson<PriceTrendDto[]>('/analytics/price-trend');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    date: r.scrape_date,
-    avgPrice: r.avg_price ?? 0,
-    skuCount: r.sku_count,
-  }));
+export function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
+  return cached('price-trend', async () => {
+    const rows = await fetchJson<PriceTrendDto[]>('/analytics/price-trend');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      date: r.scrape_date,
+      avgPrice: r.avg_price ?? 0,
+      skuCount: r.sku_count,
+    }));
+  });
 }
 
-/** GET /catalog?company=... once per tracked company, flattened — no single
- * "all companies" catalog endpoint exists on the backend. */
-export async function getSkuRows(): Promise<SkuRow[]> {
-  const companies = await getCompanies();
-  const perCompany = await Promise.all(
-    companies.map(async (c) => {
-      const data = await fetchJson<CatalogResponseDto>(`/catalog?company=${encodeURIComponent(c.siteCode)}`);
-      return data.skus
-        .filter((s) => s.category !== null)
-        .map(
-          (s): SkuRow => ({
-            skuId: s.sku_id,
-            siteCode: c.siteCode,
-            category: s.category as Category,
-            status: s.status,
-            priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
-            listPrice: s.pricing_and_margins.list_price,
-            avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
-            isBestSeller: s.performance_data.is_best_seller,
-            dateAdded: s.date_added,
-          }),
-        );
-    }),
-  );
-  return perCompany.flat();
+/** GET /catalog?company=... once per tracked company, in parallel, then
+ * flattened — no single "all companies" catalog endpoint exists on the
+ * backend. This is the heaviest call (full raw SKU detail per company), so
+ * callers should only invoke it when the raw data is actually needed
+ * (e.g. the CSV export), not as part of a page's initial load. */
+export function getSkuRows(): Promise<SkuRow[]> {
+  return cached('sku-rows', async () => {
+    const companies = await getCompanies();
+    const perCompany = await Promise.all(
+      companies.map(async (c) => {
+        const data = await fetchJson<CatalogResponseDto>(`/catalog?company=${encodeURIComponent(c.siteCode)}`);
+        return data.skus
+          .filter((s) => s.category !== null)
+          .map(
+            (s): SkuRow => ({
+              skuId: s.sku_id,
+              siteCode: c.siteCode,
+              category: s.category as Category,
+              status: s.status,
+              priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
+              listPrice: s.pricing_and_margins.list_price,
+              avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
+              isBestSeller: s.performance_data.is_best_seller,
+              dateAdded: s.date_added,
+            }),
+          );
+      }),
+    );
+    return perCompany.flat();
+  });
 }
 
 /* =====================================================================
@@ -229,74 +259,84 @@ interface TopOfFeedShareDto {
 }
 
 /** GET /analytics/category-rank */
-export async function getRankedProductsData(): Promise<RankedProduct[]> {
-  const rows = await fetchJson<RankedProductDto[]>('/analytics/category-rank');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    skuId: r.sku_id,
-    name: r.name,
-    imageUrl: r.image_url ?? '',
-    price: r.price ?? 0,
-    categoryIndex: r.category_index,
-    categoryTotal: r.category_total,
-    rankScore: r.rank_score,
-    isBestSeller: r.is_best_seller,
-    isNewArrival: r.is_new_arrival,
-  }));
+export function getRankedProductsData(): Promise<RankedProduct[]> {
+  return cached('category-rank', async () => {
+    const rows = await fetchJson<RankedProductDto[]>('/analytics/category-rank');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      skuId: r.sku_id,
+      name: r.name,
+      imageUrl: r.image_url ?? '',
+      price: r.price ?? 0,
+      categoryIndex: r.category_index,
+      categoryTotal: r.category_total,
+      rankScore: r.rank_score,
+      isBestSeller: r.is_best_seller,
+      isNewArrival: r.is_new_arrival,
+    }));
+  });
 }
 
 /** GET /analytics/rank-movement */
-export async function getRankMovementData(): Promise<RankMovementRow[]> {
-  const rows = await fetchJson<RankMovementDto[]>('/analytics/rank-movement');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    skuId: r.sku_id,
-    name: r.name,
-    imageUrl: r.image_url ?? '',
-    positionToday: r.position_today,
-    positionYesterday: r.position_yesterday,
-    delta: r.delta,
-  }));
+export function getRankMovementData(): Promise<RankMovementRow[]> {
+  return cached('rank-movement', async () => {
+    const rows = await fetchJson<RankMovementDto[]>('/analytics/rank-movement');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      skuId: r.sku_id,
+      name: r.name,
+      imageUrl: r.image_url ?? '',
+      positionToday: r.position_today,
+      positionYesterday: r.position_yesterday,
+      delta: r.delta,
+    }));
+  });
 }
 
 /** GET /analytics/flagged-rank-gap */
-export async function getFlaggedGapData(): Promise<FlaggedGapRow[]> {
-  const rows = await fetchJson<FlaggedGapDto[]>('/analytics/flagged-rank-gap');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    flaggedAvgScore: r.flagged_avg_score,
-    catalogAvgScore: r.catalog_avg_score,
-    gap: r.gap,
-    flaggedCount: r.flagged_count,
-    totalCount: r.total_count,
-  }));
+export function getFlaggedGapData(): Promise<FlaggedGapRow[]> {
+  return cached('flagged-rank-gap', async () => {
+    const rows = await fetchJson<FlaggedGapDto[]>('/analytics/flagged-rank-gap');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      flaggedAvgScore: r.flagged_avg_score,
+      catalogAvgScore: r.catalog_avg_score,
+      gap: r.gap,
+      flaggedCount: r.flagged_count,
+      totalCount: r.total_count,
+    }));
+  });
 }
 
 /** GET /analytics/collection-spread */
-export async function getCollectionSpreadData(): Promise<CollectionSpreadRow[]> {
-  const rows = await fetchJson<CollectionSpreadDto[]>('/analytics/collection-spread');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    skuId: r.sku_id,
-    name: r.name,
-    imageUrl: r.image_url ?? '',
-    nCategories: r.n_categories,
-  }));
+export function getCollectionSpreadData(): Promise<CollectionSpreadRow[]> {
+  return cached('collection-spread', async () => {
+    const rows = await fetchJson<CollectionSpreadDto[]>('/analytics/collection-spread');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      skuId: r.sku_id,
+      name: r.name,
+      imageUrl: r.image_url ?? '',
+      nCategories: r.n_categories,
+    }));
+  });
 }
 
 /** GET /analytics/top-of-feed-share */
-export async function getTopOfFeedShareData(): Promise<TopOfFeedShareRow[]> {
-  const rows = await fetchJson<TopOfFeedShareDto[]>('/analytics/top-of-feed-share');
-  return rows.map((r) => ({
-    siteCode: r.site_code,
-    category: r.category,
-    pctTopDecile: r.pct_top_decile ?? 0,
-    skuCount: r.sku_count,
-  }));
+export function getTopOfFeedShareData(): Promise<TopOfFeedShareRow[]> {
+  return cached('top-of-feed-share', async () => {
+    const rows = await fetchJson<TopOfFeedShareDto[]>('/analytics/top-of-feed-share');
+    return rows.map((r) => ({
+      siteCode: r.site_code,
+      category: r.category,
+      pctTopDecile: r.pct_top_decile ?? 0,
+      skuCount: r.sku_count,
+    }));
+  });
 }
 
 /* =====================================================================
@@ -344,4 +384,87 @@ function mapGraphSpec(g: GraphSpecDto): GraphSpec {
 export async function askQuery(query: string): Promise<AskAwayResult> {
   const data = await postJson<AskAwayResultDto>('/query', { query });
   return { answer: data.answer, comment: data.comment, graph: mapGraphSpec(data.graph) };
+}
+
+/* =====================================================================
+ * Assortment / Pricing / Discounting / Availability. Every GET below is
+ * a thin wrapper over one /metrics/* endpoint (backend/app/routes/
+ * metrics.py) — all of them return the exact same MetricResponseDto
+ * envelope, so there's a single mapper (mapMetricResponse, reusing the
+ * mapGraphSpec above) instead of a bespoke shape per metric. Like
+ * getCategorySummary/getPriceTrendSeries, every fetch here pulls ALL
+ * companies unfiltered (no `companies=`/`category=` query params) —
+ * pages filter client-side via filterGraphByCompanies (src/lib/
+ * graph-filter.ts) so switching the CompetitorFilter chips never refetches.
+ * ===================================================================== */
+
+interface MetricResponseDto {
+  metric: string;
+  graph: GraphSpecDto;
+  caveats: string[];
+  as_of: string | null;
+}
+
+function mapMetricResponse(d: MetricResponseDto): MetricResponse {
+  return { metric: d.metric, graph: mapGraphSpec(d.graph), caveats: d.caveats, asOf: d.as_of };
+}
+
+function getMetric(path: string): Promise<MetricResponse> {
+  return cached(`metric:${path}`, async () => mapMetricResponse(await fetchJson<MetricResponseDto>(path)));
+}
+
+/** GET /metrics/assortment/sku-count — 2.1, heatmap (category x brand). */
+export function getAssortmentSkuCount(): Promise<MetricResponse> {
+  return getMetric('/metrics/assortment/sku-count');
+}
+
+/** GET /metrics/assortment/net-catalog-change — 2.2, stat tile row. */
+export function getNetCatalogChange(): Promise<MetricResponse> {
+  return getMetric('/metrics/assortment/net-catalog-change');
+}
+
+/** GET /metrics/pricing/positioning-index — 3.4, diverging bar faceted by
+ * category (no `category` param passed, so every category comes back as
+ * its own facet — the page shows one facet at a time via a Select). */
+export function getPricePositioningIndex(): Promise<MetricResponse> {
+  return getMetric('/metrics/pricing/positioning-index');
+}
+
+/** GET /metrics/pricing/price-band-mix — 3.2, stacked bar (brand x band). */
+export function getPriceBandMix(): Promise<MetricResponse> {
+  return getMetric('/metrics/pricing/price-band-mix');
+}
+
+/** GET /metrics/pricing/category-distribution — 3.3, dumbbell faceted by
+ * category (small multiples — rendered together, not one-at-a-time). */
+export function getCategoryPriceDistribution(): Promise<MetricResponse> {
+  return getMetric('/metrics/pricing/category-distribution');
+}
+
+/** GET /metrics/pricing/sku-prices — 3.1, per-SKU detail table. */
+export function getSkuPrices(): Promise<MetricResponse> {
+  return getMetric('/metrics/pricing/sku-prices');
+}
+
+/** GET /metrics/pricing/sku-percentile — 3.5, per-SKU detail table. */
+export function getSkuPricePercentile(): Promise<MetricResponse> {
+  return getMetric('/metrics/pricing/sku-percentile');
+}
+
+/** GET /metrics/discounting/depth — 4.1, heatmap (category x brand). */
+export function getDiscountDepth(): Promise<MetricResponse> {
+  return getMetric('/metrics/discounting/depth');
+}
+
+/** GET /metrics/discounting/breadth — 4.2, heatmap (category x brand). */
+export function getDiscountBreadth(): Promise<MetricResponse> {
+  return getMetric('/metrics/discounting/breadth');
+}
+
+/** GET /metrics/availability/in-stock-rate[?by_category=true] — 5.1. Two
+ * genuinely different response shapes (brand meter vs. brand x category
+ * heatmap), not client-filterable, so this takes the flag directly rather
+ * than always fetching the unfiltered/all-companies variant. */
+export function getInStockRate(byCategory = false): Promise<MetricResponse> {
+  return getMetric(`/metrics/availability/in-stock-rate${byCategory ? '?by_category=true' : ''}`);
 }

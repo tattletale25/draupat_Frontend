@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCategorySummary, getCompanies, getPriceTrendSeries, getSkuRows } from '../lib/api';
-import type { CategorySummary, Company, PriceTrendPoint, SkuRow } from '../types';
+import type { CategorySummary, Company, PriceTrendPoint } from '../types';
 import { CATEGORY_LABELS } from '../data/constants';
 import { CompetitorFilter } from '../components/dashboard/CompetitorFilter';
 import { SummaryCards } from '../components/dashboard/SummaryCards';
@@ -16,18 +16,23 @@ export function DashboardPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [summaries, setSummaries] = useState<CategorySummary[]>([]);
   const [trend, setTrend] = useState<PriceTrendPoint[]>([]);
-  const [skuRows, setSkuRows] = useState<SkuRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [exportingRaw, setExportingRaw] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getCompanies(), getCategorySummary(), getPriceTrendSeries(), getSkuRows()])
-      .then(([c, s, t, rows]) => {
+    // Raw per-SKU catalog detail (getSkuRows) is only needed for the
+    // "Export raw SKUs" button below, and is by far the heaviest call
+    // (full catalog per competitor) — fetching it here would gate the
+    // whole page on data most visits never use. It's fetched on demand
+    // instead, in exportRawSkuCsv().
+    Promise.all([getCompanies(), getCategorySummary(), getPriceTrendSeries()])
+      .then(([c, s, t]) => {
         setCompanies(c);
         setSummaries(s);
         setTrend(t);
-        setSkuRows(rows);
         setSelected(c.map((x) => x.siteCode));
       })
       .catch((err: unknown) => {
@@ -72,22 +77,31 @@ export function DashboardPage() {
     );
   }
 
-  function exportRawSkuCsv() {
-    const rows = skuRows.filter((r) => selected.includes(r.siteCode));
-    downloadCsv(
-      `competitor-sku-detail-${new Date().toISOString().slice(0, 10)}.csv`,
-      rows.map((r) => ({
-        sku_id: r.skuId,
-        competitor: companies.find((c) => c.siteCode === r.siteCode)?.brandName ?? r.siteCode,
-        category: CATEGORY_LABELS[r.category],
-        status: r.status,
-        price_tier: r.priceTier,
-        list_price_inr: r.listPrice,
-        avg_discount_pct: r.avgDiscountPct,
-        is_best_seller: r.isBestSeller,
-        date_added: r.dateAdded,
-      })),
-    );
+  async function exportRawSkuCsv() {
+    setExportingRaw(true);
+    setExportError(null);
+    try {
+      const skuRows = await getSkuRows();
+      const rows = skuRows.filter((r) => selected.includes(r.siteCode));
+      downloadCsv(
+        `competitor-sku-detail-${new Date().toISOString().slice(0, 10)}.csv`,
+        rows.map((r) => ({
+          sku_id: r.skuId,
+          competitor: companies.find((c) => c.siteCode === r.siteCode)?.brandName ?? r.siteCode,
+          category: CATEGORY_LABELS[r.category],
+          status: r.status,
+          price_tier: r.priceTier,
+          list_price_inr: r.listPrice,
+          avg_discount_pct: r.avgDiscountPct,
+          is_best_seller: r.isBestSeller,
+          date_added: r.dateAdded,
+        })),
+      );
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Failed to load raw SKU detail.');
+    } finally {
+      setExportingRaw(false);
+    }
   }
 
   if (loading) {
@@ -107,9 +121,10 @@ export function DashboardPage() {
           onToggle={toggleCompany}
           onSelectAll={() => setSelected(companies.map((c) => c.siteCode))}
         />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button variant="outline" size="sm" onClick={exportRawSkuCsv}>
-            <IconDownload /> Export raw SKUs
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {exportError && <span className="chart-empty">{exportError}</span>}
+          <Button variant="outline" size="sm" onClick={exportRawSkuCsv} disabled={exportingRaw}>
+            <IconDownload /> {exportingRaw ? 'Preparing…' : 'Export raw SKUs'}
           </Button>
           <Button variant="accent" size="sm" onClick={exportSummaryCsv}>
             <IconDownload /> Download CSV

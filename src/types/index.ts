@@ -228,3 +228,18 @@ export interface AskAwayResult {
   comment: string;
   graph: GraphSpec;
 }
+
+/* =====================================================================
+ * Assortment / Pricing / Discounting / Availability pages. Every
+ * GET /metrics/* endpoint (backend/app/routes/metrics.py) returns this
+ * same envelope around a GraphSpec — see API_CONTRACT.md for the full
+ * endpoint list. `caveats` are backend-verified data-quality notes (e.g.
+ * "only one scrape_date exists so far"), not generic boilerplate — surface
+ * them near the chart they apply to instead of dropping them.
+ * ===================================================================== */
+export interface MetricResponse {
+  metric: string;
+  graph: GraphSpec;
+  caveats: string[];
+  asOf: string | null;
+}

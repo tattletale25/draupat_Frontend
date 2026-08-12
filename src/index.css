@@ -42,6 +42,14 @@
   --chart-6: #0891b2;
   --chart-7: #ca8a04;
 
+  /* magnitude ramp (heatmaps, ordered price-band stacked bars) — a slate
+     hue deliberately NOT one of --chart-1..7, so a shaded cell never
+     reads as "this is brand X's color" */
+  --sequential-rgb: 51, 65, 85;
+  /* diverging pricing-index bars — below market / above market */
+  --diverging-under: #059669;
+  --diverging-over: var(--destructive);
+
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
 
