@@ -16,7 +16,8 @@ import { GraphRenderer } from '../components/dashboard/GraphRenderer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { Tabs } from '../components/ui/Tabs';
-import { filterGraphByCompanies } from '../lib/graph-filter';
+import { filterGraphByCompanies, moveBrandToEnd } from '../lib/graph-filter';
+import type { GraphSpec } from '../types';
 
 type DetailTab = 'prices' | 'percentile';
 
@@ -70,6 +71,12 @@ export function PricingPage() {
 
   const allSiteCodes = useMemo(() => companies.map((c) => c.siteCode), [companies]);
 
+  // BlueStone trails every metrics-page chart rather than sitting first
+  // (where alphabetical order would otherwise put it) — see graph-filter.ts.
+  function prepare(graph: GraphSpec): GraphSpec {
+    return moveBrandToEnd(filterGraphByCompanies(graph, allSiteCodes, selected), allSiteCodes, 'bluestone');
+  }
+
   function toggleCompany(siteCode: string) {
     setSelected((prev) => (prev.includes(siteCode) ? prev.filter((s) => s !== siteCode) : [...prev, siteCode]));
   }
@@ -81,12 +88,12 @@ export function PricingPage() {
     return <div className="chart-empty">Couldn't load pricing data{error ? `: ${error}` : ''}.</div>;
   }
 
-  const filteredIndex = filterGraphByCompanies(positioningIndex.graph, allSiteCodes, selected);
+  const filteredIndex = prepare(positioningIndex.graph);
   const indexFacet = filteredIndex.facets.find((f) => f.title === category) ?? filteredIndex.facets[0];
-  const filteredMix = filterGraphByCompanies(priceBandMix.graph, allSiteCodes, selected);
-  const filteredDistribution = filterGraphByCompanies(categoryDistribution.graph, allSiteCodes, selected);
-  const filteredPrices = filterGraphByCompanies(skuPrices.graph, allSiteCodes, selected);
-  const filteredPercentile = filterGraphByCompanies(skuPercentile.graph, allSiteCodes, selected);
+  const filteredMix = prepare(priceBandMix.graph);
+  const filteredDistribution = prepare(categoryDistribution.graph);
+  const filteredPrices = prepare(skuPrices.graph);
+  const filteredPercentile = prepare(skuPercentile.graph);
 
   return (
     <>

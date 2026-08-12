@@ -6,7 +6,7 @@ import { MetricCaveats } from '../components/dashboard/MetricCaveats';
 import { GraphRenderer } from '../components/dashboard/GraphRenderer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Tabs } from '../components/ui/Tabs';
-import { filterGraphByCompanies } from '../lib/graph-filter';
+import { filterGraphByCompanies, moveBrandToEnd } from '../lib/graph-filter';
 
 type ViewMode = 'meter' | 'heatmap';
 
@@ -56,6 +56,13 @@ export function AvailabilityPage() {
   }
 
   const active = view === 'meter' ? meter : heatmap;
+  // BlueStone trails every metrics-page chart rather than sitting first
+  // (where alphabetical order would otherwise put it) — see graph-filter.ts.
+  const preparedGraph = moveBrandToEnd(
+    filterGraphByCompanies(active.graph, allSiteCodes, selected),
+    allSiteCodes,
+    'bluestone',
+  );
 
   return (
     <>
@@ -77,7 +84,7 @@ export function AvailabilityPage() {
           <Tabs value={view} onChange={setView} options={VIEW_OPTIONS} />
         </CardHeader>
         <CardContent>
-          <GraphRenderer graph={filterGraphByCompanies(active.graph, allSiteCodes, selected)} />
+          <GraphRenderer graph={preparedGraph} />
           <MetricCaveats caveats={active.caveats} />
         </CardContent>
       </Card>

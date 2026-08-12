@@ -5,7 +5,8 @@ import { CompetitorFilter } from '../components/dashboard/CompetitorFilter';
 import { MetricCaveats } from '../components/dashboard/MetricCaveats';
 import { GraphRenderer } from '../components/dashboard/GraphRenderer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { filterGraphByCompanies } from '../lib/graph-filter';
+import { filterGraphByCompanies, moveBrandToEnd } from '../lib/graph-filter';
+import type { GraphSpec } from '../types';
 
 /** 4.1 average discount depth + 4.2 % SKUs discounted — kept as two
  * side-by-side heatmaps (same category x brand grid as Assortment's
@@ -36,6 +37,12 @@ export function DiscountingPage() {
 
   const allSiteCodes = useMemo(() => companies.map((c) => c.siteCode), [companies]);
 
+  // BlueStone trails every metrics-page chart rather than sitting first
+  // (where alphabetical order would otherwise put it) — see graph-filter.ts.
+  function prepare(graph: GraphSpec): GraphSpec {
+    return moveBrandToEnd(filterGraphByCompanies(graph, allSiteCodes, selected), allSiteCodes, 'bluestone');
+  }
+
   function toggleCompany(siteCode: string) {
     setSelected((prev) => (prev.includes(siteCode) ? prev.filter((s) => s !== siteCode) : [...prev, siteCode]));
   }
@@ -65,7 +72,7 @@ export function DiscountingPage() {
             <CardDescription>Advertised discount %, per brand and category</CardDescription>
           </CardHeader>
           <CardContent>
-            <GraphRenderer graph={filterGraphByCompanies(depth.graph, allSiteCodes, selected)} />
+            <GraphRenderer graph={prepare(depth.graph)} />
             <MetricCaveats caveats={depth.caveats} />
           </CardContent>
         </Card>
@@ -76,7 +83,7 @@ export function DiscountingPage() {
             <CardDescription>Breadth of discounting, per brand and category</CardDescription>
           </CardHeader>
           <CardContent>
-            <GraphRenderer graph={filterGraphByCompanies(breadth.graph, allSiteCodes, selected)} />
+            <GraphRenderer graph={prepare(breadth.graph)} />
             <MetricCaveats caveats={breadth.caveats} />
           </CardContent>
         </Card>

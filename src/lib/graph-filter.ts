@@ -63,3 +63,50 @@ export function filterGraphByCompanies(
 
   return graph;
 }
+
+/** Reorders whichever axis holds brand labels so `siteCode` sorts last,
+ * leaving every other brand in its existing relative order — e.g. moving
+ * BlueStone to the end of every metrics-page chart/table. Same axis
+ * detection as filterGraphByCompanies (brand sits on categories OR series
+ * depending on the metric), same facet/table recursion. */
+export function moveBrandToEnd(graph: GraphSpec, allSiteCodes: string[], siteCode: string): GraphSpec {
+  if (graph.facets.length > 0) {
+    return { ...graph, facets: graph.facets.map((f) => moveBrandToEnd(f, allSiteCodes, siteCode)) };
+  }
+
+  if (graph.table) {
+    const hasSiteCode = graph.table.rows.length === 0 || 'site_code' in graph.table.rows[0];
+    if (hasSiteCode) {
+      const rows = [...graph.table.rows].sort(
+        (a, b) => Number(a.site_code === siteCode) - Number(b.site_code === siteCode),
+      );
+      return { ...graph, table: { ...graph.table, rows } };
+    }
+    return graph;
+  }
+
+  const categoryLabels = graph.xAxis.categories.map((c) => c.label);
+  if (isSiteCodeAxis(categoryLabels, allSiteCodes)) {
+    const order = categoryLabels
+      .map((_, i) => i)
+      .sort((a, b) => Number(categoryLabels[a] === siteCode) - Number(categoryLabels[b] === siteCode));
+    return {
+      ...graph,
+      xAxis: { ...graph.xAxis, categories: order.map((i) => graph.xAxis.categories[i]) },
+      yAxis: {
+        ...graph.yAxis,
+        series: graph.yAxis.series.map((s) => ({ ...s, values: order.map((i) => s.values[i]) })),
+      },
+    };
+  }
+
+  const seriesNames = graph.yAxis.series.map((s) => s.name);
+  if (isSiteCodeAxis(seriesNames, allSiteCodes)) {
+    const series = [...graph.yAxis.series].sort(
+      (a, b) => Number(a.name === siteCode) - Number(b.name === siteCode),
+    );
+    return { ...graph, yAxis: { ...graph.yAxis, series } };
+  }
+
+  return graph;
+}

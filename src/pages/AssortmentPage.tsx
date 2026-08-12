@@ -5,7 +5,8 @@ import { CompetitorFilter } from '../components/dashboard/CompetitorFilter';
 import { MetricCaveats } from '../components/dashboard/MetricCaveats';
 import { GraphRenderer } from '../components/dashboard/GraphRenderer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
-import { filterGraphByCompanies } from '../lib/graph-filter';
+import { filterGraphByCompanies, moveBrandToEnd } from '../lib/graph-filter';
+import type { GraphSpec } from '../types';
 
 /** 2.1 SKU count per category/brand (heatmap) + 2.2 net catalog change
  * (stat tile row) — see the dataviz spec's Assortment section. */
@@ -32,6 +33,12 @@ export function AssortmentPage() {
   }, []);
 
   const allSiteCodes = useMemo(() => companies.map((c) => c.siteCode), [companies]);
+
+  // BlueStone trails every metrics-page chart rather than sitting first
+  // (where alphabetical order would otherwise put it) — see graph-filter.ts.
+  function prepare(graph: GraphSpec): GraphSpec {
+    return moveBrandToEnd(filterGraphByCompanies(graph, allSiteCodes, selected), allSiteCodes, 'bluestone');
+  }
 
   function toggleCompany(siteCode: string) {
     setSelected((prev) => (prev.includes(siteCode) ? prev.filter((s) => s !== siteCode) : [...prev, siteCode]));
@@ -61,7 +68,7 @@ export function AssortmentPage() {
           <CardDescription>Catalog breadth at each site's latest scrape — darker = more SKUs</CardDescription>
         </CardHeader>
         <CardContent>
-          <GraphRenderer graph={filterGraphByCompanies(skuCount.graph, allSiteCodes, selected)} />
+          <GraphRenderer graph={prepare(skuCount.graph)} />
           <MetricCaveats caveats={skuCount.caveats} />
         </CardContent>
       </Card>
@@ -72,10 +79,7 @@ export function AssortmentPage() {
           <CardDescription>SKUs added vs. removed since the previous scrape, per brand</CardDescription>
         </CardHeader>
         <CardContent>
-          <GraphRenderer
-            graph={filterGraphByCompanies(netChange.graph, allSiteCodes, selected)}
-            preliminary={netChange.caveats.length > 0}
-          />
+          <GraphRenderer graph={prepare(netChange.graph)} preliminary={netChange.caveats.length > 0} />
           <MetricCaveats caveats={netChange.caveats} />
         </CardContent>
       </Card>
