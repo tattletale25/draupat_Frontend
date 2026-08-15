@@ -57,6 +57,7 @@ interface PriceTrendDto {
 }
 
 interface CatalogSkuDto {
+  company: string;
   sku_id: string;
   status: 'Live' | 'Inactive';
   date_added: string;
@@ -167,35 +168,33 @@ export function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
   });
 }
 
-/** GET /catalog?company=... once per tracked company, in parallel, then
- * flattened — no single "all companies" catalog endpoint exists on the
- * backend. This is the heaviest call (full raw SKU detail per company), so
- * callers should only invoke it when the raw data is actually needed
- * (e.g. the CSV export), not as part of a page's initial load. */
+/** GET /catalog?company=...&company=...  — one request for every tracked
+ * company (the backend accepts repeated `company` params and runs a single
+ * set-scoped query), rather than N parallel per-company requests. Each row
+ * carries its own `company` field so the combined response stays
+ * attributable. This is still the heaviest call (full raw SKU detail), so
+ * callers should only invoke it when the raw data is actually needed (e.g.
+ * the CSV export), not as part of a page's initial load. */
 export function getSkuRows(): Promise<SkuRow[]> {
   return cached('sku-rows', async () => {
     const companies = await getCompanies();
-    const perCompany = await Promise.all(
-      companies.map(async (c) => {
-        const data = await fetchJson<CatalogResponseDto>(`/catalog?company=${encodeURIComponent(c.siteCode)}`);
-        return data.skus
-          .filter((s) => s.category !== null)
-          .map(
-            (s): SkuRow => ({
-              skuId: s.sku_id,
-              siteCode: c.siteCode,
-              category: s.category as Category,
-              status: s.status,
-              priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
-              listPrice: s.pricing_and_margins.list_price,
-              avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
-              isBestSeller: s.performance_data.is_best_seller,
-              dateAdded: s.date_added,
-            }),
-          );
-      }),
-    );
-    return perCompany.flat();
+    const qs = companies.map((c) => `company=${encodeURIComponent(c.siteCode)}`).join('&');
+    const data = await fetchJson<CatalogResponseDto>(`/catalog?${qs}`);
+    return data.skus
+      .filter((s) => s.category !== null)
+      .map(
+        (s): SkuRow => ({
+          skuId: s.sku_id,
+          siteCode: s.company,
+          category: s.category as Category,
+          status: s.status,
+          priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
+          listPrice: s.pricing_and_margins.list_price,
+          avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
+          isBestSeller: s.performance_data.is_best_seller,
+          dateAdded: s.date_added,
+        }),
+      );
   });
 }
 
