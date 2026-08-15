@@ -4,7 +4,7 @@ import type {
   Category,
   Company,
   CategorySummary,
-  CollectionSpreadRow,
+  CollectionSpreadResponse,
   FlaggedGapRow,
   GraphSpec,
   MetricResponse,
@@ -73,7 +73,10 @@ interface CatalogSkuDto {
 
 interface CatalogResponseDto {
   skus: CatalogSkuDto[];
+  total_skus: number;
 }
+
+const CATALOG_PAGE_SIZE = 2000;
 
 // Every GET below reflects a once-daily data refresh (see README), so
 // caching for the lifetime of the page is safe: repeat calls (e.g.
@@ -168,33 +171,50 @@ export function getPriceTrendSeries(): Promise<PriceTrendPoint[]> {
   });
 }
 
-/** GET /catalog?company=...&company=...  — one request for every tracked
- * company (the backend accepts repeated `company` params and runs a single
+function mapCatalogSku(s: CatalogSkuDto): SkuRow {
+  return {
+    skuId: s.sku_id,
+    siteCode: s.company,
+    category: s.category as Category,
+    status: s.status,
+    priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
+    listPrice: s.pricing_and_margins.list_price,
+    avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
+    isBestSeller: s.performance_data.is_best_seller,
+    dateAdded: s.date_added,
+  };
+}
+
+/** GET /catalog?company=...&company=...  — one company= param per tracked
+ * company (the backend accepts repeated params and runs a single
  * set-scoped query), rather than N parallel per-company requests. Each row
  * carries its own `company` field so the combined response stays
  * attributable. This is still the heaviest call (full raw SKU detail), so
  * callers should only invoke it when the raw data is actually needed (e.g.
- * the CSV export), not as part of a page's initial load. */
+ * the CSV export), not as part of a page's initial load.
+ *
+ * The backend paginates this (a big site can have 8,000-21,000+ SKUs —
+ * returned whole, that's what OOM'd a sibling endpoint), so this pages
+ * through with `limit`/`offset` using the response's `total_skus` and
+ * flattens the result — callers still just get one full `SkuRow[]`.
+ * Across all 7 sites, `total_skus` is currently ~80,000 (~40 pages at
+ * CATALOG_PAGE_SIZE) — fetched SEQUENTIALLY, not via Promise.all, since
+ * firing dozens of concurrent requests at a memory-constrained backend
+ * (each opening its own DB connection, no pooling) is the same class of
+ * problem this pagination was added to avoid, just moved to the client
+ * side. This is only ever called on-demand (CSV export button), not on
+ * page load, so the extra latency from going sequential is a fine trade. */
 export function getSkuRows(): Promise<SkuRow[]> {
   return cached('sku-rows', async () => {
     const companies = await getCompanies();
     const qs = companies.map((c) => `company=${encodeURIComponent(c.siteCode)}`).join('&');
-    const data = await fetchJson<CatalogResponseDto>(`/catalog?${qs}`);
-    return data.skus
-      .filter((s) => s.category !== null)
-      .map(
-        (s): SkuRow => ({
-          skuId: s.sku_id,
-          siteCode: s.company,
-          category: s.category as Category,
-          status: s.status,
-          priceTier: (s.pricing_and_margins.price_tier as SkuRow['priceTier']) ?? 'unknown',
-          listPrice: s.pricing_and_margins.list_price,
-          avgDiscountPct: s.pricing_and_margins.average_discount_percentage,
-          isBestSeller: s.performance_data.is_best_seller,
-          dateAdded: s.date_added,
-        }),
-      );
+    const first = await fetchJson<CatalogResponseDto>(`/catalog?${qs}&limit=${CATALOG_PAGE_SIZE}&offset=0`);
+    const rows = [...first.skus];
+    for (let offset = CATALOG_PAGE_SIZE; offset < first.total_skus; offset += CATALOG_PAGE_SIZE) {
+      const page = await fetchJson<CatalogResponseDto>(`/catalog?${qs}&limit=${CATALOG_PAGE_SIZE}&offset=${offset}`);
+      rows.push(...page.skus);
+    }
+    return rows.filter((s) => s.category !== null).map(mapCatalogSku);
   });
 }
 
@@ -241,13 +261,26 @@ interface FlaggedGapDto {
   total_count: number;
 }
 
-interface CollectionSpreadDto {
+interface CollectionSpreadRowDto {
   site_code: string;
   category: Category;
   sku_id: string;
   name: string;
   image_url: string | null;
   n_categories: number;
+}
+
+interface CollectionSpreadSummaryDto {
+  site_code: string;
+  category: Category;
+  avg_n_categories: number;
+  max_n_categories: number;
+  sku_count: number;
+}
+
+interface CollectionSpreadResponseDto {
+  summary: CollectionSpreadSummaryDto[];
+  leaderboard: CollectionSpreadRowDto[];
 }
 
 interface TopOfFeedShareDto {
@@ -310,18 +343,29 @@ export function getFlaggedGapData(): Promise<FlaggedGapRow[]> {
   });
 }
 
-/** GET /analytics/collection-spread */
-export function getCollectionSpreadData(): Promise<CollectionSpreadRow[]> {
+/** GET /analytics/collection-spread — `summary` (avg/max/count per site
+ * category, SQL-aggregated) + `leaderboard` (bounded global top-100 by
+ * nCategories), not a raw per-SKU array anymore — see CollectionSpreadResponse. */
+export function getCollectionSpreadData(): Promise<CollectionSpreadResponse> {
   return cached('collection-spread', async () => {
-    const rows = await fetchJson<CollectionSpreadDto[]>('/analytics/collection-spread');
-    return rows.map((r) => ({
-      siteCode: r.site_code,
-      category: r.category,
-      skuId: r.sku_id,
-      name: r.name,
-      imageUrl: r.image_url ?? '',
-      nCategories: r.n_categories,
-    }));
+    const data = await fetchJson<CollectionSpreadResponseDto>('/analytics/collection-spread');
+    return {
+      summary: data.summary.map((s) => ({
+        siteCode: s.site_code,
+        category: s.category,
+        avgNCategories: s.avg_n_categories,
+        maxNCategories: s.max_n_categories,
+        skuCount: s.sku_count,
+      })),
+      leaderboard: data.leaderboard.map((r) => ({
+        siteCode: r.site_code,
+        category: r.category,
+        skuId: r.sku_id,
+        name: r.name,
+        imageUrl: r.image_url ?? '',
+        nCategories: r.n_categories,
+      })),
+    };
   });
 }
 

@@ -10,7 +10,7 @@ import {
 import { CATEGORIES } from '../types';
 import type {
   Category,
-  CollectionSpreadRow,
+  CollectionSpreadResponse,
   Company,
   FlaggedGapRow,
   RankMovementRow,
@@ -47,7 +47,7 @@ export function ProductIndexPage() {
   const [ranked, setRanked] = useState<RankedProduct[]>([]);
   const [movement, setMovement] = useState<RankMovementRow[]>([]);
   const [gap, setGap] = useState<FlaggedGapRow[]>([]);
-  const [spread, setSpread] = useState<CollectionSpreadRow[]>([]);
+  const [spread, setSpread] = useState<CollectionSpreadResponse>({ summary: [], leaderboard: [] });
   const [share, setShare] = useState<TopOfFeedShareRow[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [category, setCategory] = useState<Category>('rings');
@@ -126,7 +126,7 @@ export function ProductIndexPage() {
         <RankMovementTab companies={selectedCompanies} rows={movement} category={category} />
       )}
       {tab === 'gap' && <FlaggedGapTab companies={selectedCompanies} rows={gap} />}
-      {tab === 'spread' && <CollectionSpreadTab companies={selectedCompanies} rows={spread} />}
+      {tab === 'spread' && <CollectionSpreadTab companies={selectedCompanies} data={spread} />}
       {tab === 'share' && <TopOfFeedShareTab companies={selectedCompanies} rows={share} />}
     </>
   );

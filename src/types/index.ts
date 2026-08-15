@@ -140,6 +140,27 @@ export interface CollectionSpreadRow {
   nCategories: number;
 }
 
+/** Per (site, category): avg/max collections-per-SKU + SKU count — computed
+ * server-side via SQL GROUP BY (not aggregated from the raw per-SKU rows in
+ * JS anymore, which was both unbounded and silently wrong once any cap was
+ * applied to the source data). Maps to GET /analytics/collection-spread's
+ * `summary` array. */
+export interface CollectionSpreadSummaryRow {
+  siteCode: string;
+  category: Category;
+  avgNCategories: number;
+  maxNCategories: number;
+  skuCount: number;
+}
+
+/** GET /analytics/collection-spread's full response: a small SQL-computed
+ * `summary` plus a bounded global `leaderboard` (top 100 SKUs by
+ * nCategories, not per-brand). */
+export interface CollectionSpreadResponse {
+  summary: CollectionSpreadSummaryRow[];
+  leaderboard: CollectionSpreadRow[];
+}
+
 /** Per site+category: % of SKUs sitting in the top decile of shelf position
  * — how concentrated vs. flat a brand's merchandising is. Maps to
  * GET /analytics/top-of-feed-share (v_api_top_of_feed_share). Gated on

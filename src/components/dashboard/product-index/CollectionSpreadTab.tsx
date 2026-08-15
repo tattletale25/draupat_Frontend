@@ -1,4 +1,5 @@
-import type { Category, CollectionSpreadRow, Company } from '../../../types';
+import type { Company } from '../../../types';
+import type { CollectionSpreadResponse } from '../../../types';
 import { CATEGORY_LABELS } from '../../../data/constants';
 import { formatNumber } from '../../../lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/Card';
@@ -8,44 +9,27 @@ import { NotTrackedNotice } from './NotTrackedNotice';
 
 interface Props {
   companies: Company[];
-  rows: CollectionSpreadRow[];
-}
-
-interface SpreadSummary {
-  siteCode: string;
-  category: Category;
-  avg: number;
-  max: number;
-  count: number;
+  data: CollectionSpreadResponse;
 }
 
 /** How many distinct collections each SKU is cross-merchandised into — a
  * proxy for how hard a brand is pushing it. Complementary site coverage to
- * Category Rank Score, not the same three sites (see contract). */
-export function CollectionSpreadTab({ companies, rows }: Props) {
+ * Category Rank Score, not the same three sites (see contract).
+ *
+ * `summary` and `leaderboard` both come pre-aggregated/pre-bounded from
+ * the backend (SQL GROUP BY / global top-100 by nCategories) — this
+ * component only filters by selected companies, it doesn't compute
+ * avg/max/count itself anymore (that used to be done here in JS over the
+ * full per-SKU array, which was both unbounded and silently wrong once
+ * any cap was applied to the source data). */
+export function CollectionSpreadTab({ companies, data }: Props) {
   const supported = companies.filter((c) => c.capabilities.collectionSpread);
   const unsupported = companies.filter((c) => !c.capabilities.collectionSpread);
   const supportedCodes = new Set(supported.map((c) => c.siteCode));
   const brandName = (siteCode: string) => companies.find((c) => c.siteCode === siteCode)?.brandName ?? siteCode;
 
-  const scoped = rows.filter((r) => supportedCodes.has(r.siteCode));
-
-  const summaryMap = new Map<string, { siteCode: string; category: Category; values: number[] }>();
-  for (const r of scoped) {
-    const key = `${r.siteCode}:${r.category}`;
-    const entry = summaryMap.get(key);
-    if (entry) entry.values.push(r.nCategories);
-    else summaryMap.set(key, { siteCode: r.siteCode, category: r.category, values: [r.nCategories] });
-  }
-  const summaryRows: SpreadSummary[] = Array.from(summaryMap.values()).map((s) => ({
-    siteCode: s.siteCode,
-    category: s.category,
-    avg: s.values.reduce((a, b) => a + b, 0) / s.values.length,
-    max: Math.max(...s.values),
-    count: s.values.length,
-  }));
-
-  const leaderboard = [...scoped].sort((a, b) => b.nCategories - a.nCategories).slice(0, 10);
+  const summaryRows = data.summary.filter((s) => supportedCodes.has(s.siteCode));
+  const leaderboard = data.leaderboard.filter((r) => supportedCodes.has(r.siteCode)).slice(0, 10);
 
   return (
     <div className="tab-stack">
@@ -85,9 +69,9 @@ export function CollectionSpreadTab({ companies, rows }: Props) {
                     <TableRow key={`${s.siteCode}-${s.category}`}>
                       <TableCell>{brandName(s.siteCode)}</TableCell>
                       <TableCell>{CATEGORY_LABELS[s.category]}</TableCell>
-                      <TableCell>{s.avg.toFixed(1)}</TableCell>
-                      <TableCell>{s.max}</TableCell>
-                      <TableCell>{formatNumber(s.count)}</TableCell>
+                      <TableCell>{s.avgNCategories.toFixed(1)}</TableCell>
+                      <TableCell>{s.maxNCategories}</TableCell>
+                      <TableCell>{formatNumber(s.skuCount)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
