@@ -5,26 +5,29 @@ export interface LineSeries {
   key: string;
   label: string;
   color: string;
-  values: number[]; // aligned with `labels`
+  values: (number | null)[]; // aligned with `labels`; null = no data point for that slot
 }
 
 interface LineChartProps {
   labels: string[]; // x-axis (dates)
   series: LineSeries[];
   height?: number;
-  valueFormatter?: (v: number) => string;
+  valueFormatter?: (v: number | null) => string;
   labelFormatter?: (label: string) => string;
 }
 
 const W = 640;
 
 /** Generic multi-series line chart, hand-rolled with SVG (no recharts —
- * no npm access in this environment). Used for the price-history trend. */
+ * no npm access in this environment). Used for the price-history trend.
+ * A `null` value breaks the line (and skips the hover dot) instead of
+ * being plotted as 0 — a product with no fetched price for some date is
+ * missing data, not a real price crash to zero. */
 export function LineChart({
   labels,
   series,
   height = 260,
-  valueFormatter = String,
+  valueFormatter = (v) => (v === null ? '—' : String(v)),
   labelFormatter = (l) => l,
 }: LineChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -41,7 +44,7 @@ export function LineChart({
   const innerW = W - padLeft - padRight;
   const innerH = height - padTop - padBottom;
 
-  const allValues = series.flatMap((s) => s.values);
+  const allValues = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
   const maxVal = niceMax(Math.max(1, ...allValues));
   const minVal = 0;
   const ticks = ticksFor(maxVal, 4);
@@ -50,8 +53,22 @@ export function LineChart({
   const xFor = (i: number) => padLeft + i * xStep;
   const yFor = (v: number) => padTop + innerH - ((v - minVal) / (maxVal - minVal || 1)) * innerH;
 
-  const pathFor = (values: number[]) =>
-    values.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xFor(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
+  // Emits a fresh "M" (moveto, starting a new subpath) after every gap, so
+  // missing data renders as a broken line rather than interpolating across
+  // it (or, worse, dipping to 0 the way plotting null-as-0 used to).
+  const pathFor = (values: (number | null)[]) => {
+    const parts: string[] = [];
+    let started = false;
+    values.forEach((v, i) => {
+      if (v === null) {
+        started = false;
+        return;
+      }
+      parts.push(`${started ? 'L' : 'M'} ${xFor(i).toFixed(1)} ${yFor(v).toFixed(1)}`);
+      started = true;
+    });
+    return parts.join(' ');
+  };
 
   const labelStride = Math.max(1, Math.ceil(labels.length / 7));
 
@@ -110,9 +127,14 @@ export function LineChart({
         ))}
 
         {hoverIdx !== null &&
-          series.map((s) => (
-            <circle key={s.key} cx={xFor(hoverIdx)} cy={yFor(s.values[hoverIdx])} r={3} fill={s.color} stroke="var(--card)" strokeWidth={1.5} />
-          ))}
+          series.map((s) => {
+            const v = s.values[hoverIdx];
+            return (
+              v !== null && (
+                <circle key={s.key} cx={xFor(hoverIdx)} cy={yFor(v)} r={3} fill={s.color} stroke="var(--card)" strokeWidth={1.5} />
+              )
+            );
+          })}
       </svg>
 
       {hoverIdx !== null && (

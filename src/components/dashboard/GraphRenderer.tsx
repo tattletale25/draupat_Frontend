@@ -36,7 +36,8 @@ function formatCell(v: string | number | boolean | null): string {
 interface GraphRendererProps {
   graph: GraphSpec;
   /** Shown as a badge on every stat tile — set by callers that know a
-   * metric's own caveats (e.g. "n=2 days") mark it as not-yet-trustworthy.
+   * metric's own caveats mark it as not-yet-trustworthy (e.g. too little
+   * scrape history for a day-over-day comparison to be meaningful yet).
    * GraphRenderer itself never sees caveats (they live on MetricResponse,
    * one level up), so this stays an explicit opt-in per call site. */
   preliminary?: boolean;
@@ -65,10 +66,13 @@ export function GraphRenderer({ graph, preliminary }: GraphRendererProps) {
 
   const categories = graph.xAxis.categories;
   const series = graph.yAxis.series;
-  const valueFormatter = (v: number) => formatValue(v, graph.unit);
+  const valueFormatter = (v: number | null) => formatValue(v, graph.unit);
 
   switch (graph.chartType) {
     case 'line':
+      // Null passes straight through (not coalesced to 0) — a series with
+      // no value for some category is missing data, not a real drop to
+      // zero; LineChart renders that as a gap in the line.
       return (
         <LineChart
           labels={categories.map((c) => c.label)}
@@ -76,7 +80,7 @@ export function GraphRenderer({ graph, preliminary }: GraphRendererProps) {
             key: s.name,
             label: s.name,
             color: colorAt(s.color, i),
-            values: s.values.map((v) => v ?? 0),
+            values: s.values,
           }))}
           valueFormatter={valueFormatter}
         />

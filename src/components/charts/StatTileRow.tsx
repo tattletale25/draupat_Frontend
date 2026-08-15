@@ -12,9 +12,12 @@ const FALLBACK_COLORS = ['#aa3bff', '#2563eb', '#16a34a', '#ea580c', '#db2777', 
 
 /** One KPI tile per category (brand), showing EVERY named series — not
  * just the first. A plain bar chart here would visually imply more
- * confidence than a 2-day delta supports, per the dataviz spec, so this
- * stays a stat tile row with an explicit "preliminary" badge instead of
- * committing to a trend visual before there's enough history. */
+ * confidence than a day-over-day delta supports, per the dataviz spec, so
+ * this stays a stat tile row with an explicit "preliminary" badge instead
+ * of committing to a trend visual before there's enough real history
+ * (driven by whether the backend actually sends any caveats for this
+ * metric — see GraphRenderer's `preliminary` prop, not a hardcoded count
+ * of days here). */
 export function StatTileRow({ categories, series, preliminary, valueFormatter = String }: StatTileRowProps) {
   if (categories.length === 0 || series.length === 0) {
     return <div className="chart-empty">No data for the selected filters.</div>;

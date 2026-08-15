@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { ROUTES } from '../../router/routes';
 import { IconShovel } from '../ui/Icon';
+import { getCompanies } from '../../lib/api';
 
 interface SidebarProps {
   activePath: string;
@@ -7,6 +9,18 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activePath, onNavigate }: SidebarProps) {
+  // Reuses getCompanies()'s cached promise (every page already fetches it),
+  // so this costs no extra network round trip — just keeps the tracked-site
+  // count from silently drifting out of sync with /sites as brands are
+  // added/removed.
+  const [siteCount, setSiteCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    getCompanies()
+      .then((companies) => setSiteCount(companies.length))
+      .catch(() => setSiteCount(null));
+  }, []);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -34,7 +48,9 @@ export function Sidebar({ activePath, onNavigate }: SidebarProps) {
       ))}
 
       <div className="sidebar-foot">
-        Data refreshes daily from 5 tracked competitor sites.
+        {siteCount === null
+          ? 'Data refreshes daily.'
+          : `Data refreshes daily from ${siteCount} tracked competitor sites.`}
       </div>
     </aside>
   );
